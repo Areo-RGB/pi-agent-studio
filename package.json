@@ -43,12 +43,12 @@
     "release": "node scripts/release.ts",
     "fmt": "oxlint . --fix && oxfmt .",
     "lint": "oxlint . && oxfmt --check .",
-    "typecheck": "tsgo --noEmit --skipLibCheck",
+    "typecheck": "tsgo --noEmit --skipLibCheck && ./typecheck.sh",
     "test": "pnpm lint && pnpm typecheck"
   },
   "dependencies": {
-    "@earendil-works/pi-ai": "^0.84.4",
-    "@earendil-works/pi-coding-agent": "^0.84.4"
+    "@earendil-works/pi-ai": "^0.85.1",
+    "@earendil-works/pi-coding-agent": "^0.85.1"
   },
   "devDependencies": {
     "@types/node": "^25.5.0",

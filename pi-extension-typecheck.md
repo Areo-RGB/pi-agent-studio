@@ -5,38 +5,42 @@ ahead-of-time build), but they should still be type-checked after edits.
 
 ## Type-checking
 
-There is **no local `package.json`, `node_modules`, or `tsconfig.json`** in this
-directory. Extensions import types from the globally-installed pi package:
+There is **no local `package.json` or `tsconfig.json` in `bridge/`**; the types
+come from the pi packages this project declares as dependencies:
 
 - entry module: `@earendil-works/pi-coding-agent`
-- its types: `$(npm root -g)/@earendil-works/pi-coding-agent/dist/index.d.ts`
-- `@types/node`: bundled in that package's `node_modules/@types`
-- sub-packages (`@earendil-works/pi-ai`, `pi-tui`, `pi-agent-core`, `typebox`)
-  live inside that package's `node_modules/` and resolve via their `package.json`
-  `types` field.
+- `@earendil-works/pi-ai` (incl. the `pi-ai/compat` subpath used by `btw.ts`)
+- `@earendil-works/pi-tui`, `@earendil-works/pi-agent-core`, `typebox`
 
-Use the provided script, which resolves all of the above via `npm root -g`,
-writes a throwaway `.tsconfig.check.json`, runs `tsc --noEmit`, then deletes it:
+The first two resolve from the root `node_modules` normally (they are root
+dependencies). The other three are **not hoisted** to the root `node_modules`,
+so the committed `tsconfig.bridge.json` wires `paths` to the copies in
+`pi-mcp/node_modules` — `pi-mcp/package.json` declares the same pi versions as
+devDependencies, so those copies track the version this project targets (and
+`typebox` stays pinned to whatever pi itself pulls in).
 
 ```bash
-# check every extension
+# check every extension (also runs as part of `pnpm typecheck`)
 ./typecheck.sh
 
 # check a single file (faster, recommended while iterating on one extension)
 ./typecheck.sh bridge/btw.ts
 ```
 
-Run it from the `pi/` directory (the script is `./typecheck.sh` there).
+### Why a committed config instead of a generated one
 
-### Why a generated tsconfig instead of a committed one
-
-`tsc`'s `paths` mapping can only be set inside a config file (CLI gives TS6064),
-and the absolute path to the global pi package differs per machine. So the
-tsconfig is generated at check time from `npm root -g` and is never committed
-(`.tsconfig.check.json` is created and removed on each run).
+Earlier revisions generated a throwaway tsconfig from `npm root -g` and ran
+`npx -p typescript@5 tsc`. That broke twice over: `paths` entries pointing at a
+_directory_ no longer resolve under `moduleResolution: nodenext` (must point at
+the actual `.d.ts`), `typebox`'s types live at `build/index.d.mts` (not
+`dist/`), and `tsgo` (TypeScript 7 native preview) has removed `baseUrl`.
+Pointing at the local `pi-mcp/node_modules` copy removes the `npm root -g`
+machine-specific path, so the config can simply be committed — and it works in
+CI with no global install.
 
 ### Compiler options in effect
 
+- `tsgo` (same compiler as `pnpm typecheck`; no local `tsc` install needed)
 - `strict: true`
 - `skipLibCheck: true`
 - `allowImportingTsExtensions: true` (extensions import sibling `.ts` files)
@@ -44,12 +48,6 @@ tsconfig is generated at check time from `npm root -g` and is never committed
 - `noUncheckedIndexedAccess` is **not** enabled (matches the pi codebase), so
   `ARR[i]` is `string`, not `string | undefined`. The `!` on indexed access in
   the example extensions is stylistic consistency, not a requirement.
-
-### Prerequisites
-
-- Node + npm
-- pi installed globally: `npm i -g @earendil-works/pi-coding-agent`
-- TypeScript is fetched on demand via `npx -p typescript@5` (no local install)
 
 ## Notes on individual extensions
 

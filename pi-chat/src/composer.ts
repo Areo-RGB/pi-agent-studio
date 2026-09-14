@@ -62,6 +62,8 @@ import {
   handleBtw,
   setBtwLoading,
   addUserMessage,
+  resetHistoryBlock,
+  renderHistoryBlock,
 } from "./messages";
 import { t } from "./i18n";
 
@@ -1579,6 +1581,10 @@ window.addEventListener("message", function (e: MessageEvent) {
       queueState.followUp = [];
       renderQueue();
       hydrateMessages(d.messages);
+      resetHistoryBlock(!!d.historyAvailable);
+      break;
+    case "history":
+      renderHistoryBlock(d.messages || []);
       break;
     case "event":
       handleEvent(d.event);

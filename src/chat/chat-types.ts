@@ -42,8 +42,12 @@ export interface RpcSessionEntry {
   type: string;
   id: string;
   parentId?: string | null;
-  timestamp?: number;
+  timestamp?: string | number;
   message?: { role?: string; timestamp?: number; content?: unknown } & Record<string, unknown>;
+  summary?: string;
+  tokensBefore?: number;
+  firstKeptEntryId?: string;
+  fromId?: string;
 }
 
 export interface RpcEntriesData {
@@ -152,7 +156,8 @@ export type ExtToWebview =
   | { type: "models"; models: RpcModel[] }
   | { type: "thinkingLevels"; levels: string[] }
   | { type: "commands"; commands: RpcCommand[] }
-  | { type: "messages"; messages: unknown[] }
+  | { type: "messages"; messages: unknown[]; historyAvailable?: boolean }
+  | { type: "history"; messages: unknown[] }
   | { type: "event"; event: RpcEvent }
   | { type: "dialog"; request: ExtensionUiRequest }
   | { type: "pickedResources"; paths: string[] }
@@ -196,4 +201,5 @@ export type WebviewToExt =
       baselineHash: string | null;
       sessionId: string;
       basename: string;
-    };
+    }
+  | { type: "requestHistory" };

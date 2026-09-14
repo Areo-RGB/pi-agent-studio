@@ -8,8 +8,8 @@ import {
   setStreaming,
   setStatus,
   updateSendButton,
-  scheduleScroll,
-  scrollToBottom,
+  scheduleScroll as scheduleScrollRaw,
+  scrollToBottom as scrollToBottomRaw,
   PI_HOME,
   PI_SEP,
   showToast,
@@ -44,14 +44,33 @@ import {
 import { showRewindConfirm, tipBtn } from "./rewind";
 import { enhance } from "./enhance";
 import { t } from "./i18n";
-import { scheduleTimelineRebuild, clearTimeline } from "./timeline";
+import { scheduleTimelineRebuild as scheduleTimelineRebuildRaw, clearTimeline } from "./timeline";
 
 // ---- message DOM ----
+let renderTarget: HTMLElement = messagesInner;
+let suppressUi = false;
+let historyHydrationId = 0;
+let historyBlockEl: HTMLElement | null = null;
+let historyLoaded = false;
+let historyRequested = false;
+
+function scheduleScroll(): void {
+  if (!suppressUi) scheduleScrollRaw();
+}
+
+function scrollToBottom(): void {
+  if (!suppressUi) scrollToBottomRaw();
+}
+
+function scheduleTimelineRebuild(): void {
+  if (!suppressUi) scheduleTimelineRebuildRaw();
+}
+
 let pendingCompactionBlockRef: HTMLElement | null = null;
 let pendingBtwBlockRef: HTMLElement | null = null;
 
 export function addUserMessage(text: string, images?: any[]) {
-  const empty = messagesInner.querySelector(".empty");
+  const empty = renderTarget.querySelector(".empty");
   if (empty) empty.remove();
   const row = el("div", "msg user");
   const bubble = el("div", "bubble user-bubble");
@@ -68,8 +87,8 @@ export function addUserMessage(text: string, images?: any[]) {
     bubble.appendChild(wrap);
   }
   row.appendChild(bubble);
-  messagesInner.appendChild(row);
-  setLastUserBubble(bubble);
+  renderTarget.appendChild(row);
+  if (!suppressUi) setLastUserBubble(bubble);
 
   if (bubble.scrollHeight > 240) {
     bubble.classList.add("is-collapsible");
@@ -89,7 +108,7 @@ export function addUserMessage(text: string, images?: any[]) {
   metaEl.appendChild(timeEl);
   row.appendChild(metaEl);
 
-  appendUserActions(row, bubble, text, metaEl);
+  if (!suppressUi) appendUserActions(row, bubble, text, metaEl);
 
   scheduleTimelineRebuild();
   scheduleScroll();
@@ -103,7 +122,7 @@ export function applyUserBubbleTime(bubble: HTMLElement, ts: number) {
 }
 
 export function addCompactionMessage(m: any) {
-  const empty = messagesInner.querySelector(".empty");
+  const empty = renderTarget.querySelector(".empty");
   if (empty) empty.remove();
   const row = el("div", "msg compaction");
   const det = document.createElement("details");
@@ -123,13 +142,13 @@ export function addCompactionMessage(m: any) {
   renderMarkdown(body, m && typeof m.summary === "string" ? m.summary : "");
   det.appendChild(body);
   row.appendChild(det);
-  messagesInner.appendChild(row);
+  renderTarget.appendChild(row);
   scheduleTimelineRebuild();
   scheduleScroll();
 }
 
 export function addCompactionPlaceholder() {
-  const empty = messagesInner.querySelector(".empty");
+  const empty = renderTarget.querySelector(".empty");
   if (empty) empty.remove();
   const row = el("div", "msg compaction");
   const det = document.createElement("details");
@@ -147,7 +166,7 @@ export function addCompactionPlaceholder() {
   body.textContent = t("Summarizing conversation…");
   det.appendChild(body);
   row.appendChild(det);
-  messagesInner.appendChild(row);
+  renderTarget.appendChild(row);
   pendingCompactionBlockRef = row;
   scheduleScroll();
 }
@@ -169,7 +188,7 @@ export function setBtwLoading(b: boolean) {
 }
 
 export function addBtwPlaceholder(question: string, model?: string) {
-  const empty = messagesInner.querySelector(".empty");
+  const empty = renderTarget.querySelector(".empty");
   if (empty) empty.remove();
   const row = el("div", "msg btw");
   const det = document.createElement("details");
@@ -190,7 +209,7 @@ export function addBtwPlaceholder(question: string, model?: string) {
   body.textContent = t("Answering") + (model ? " " + t("with {0}", model) : "") + "\u2026";
   det.appendChild(body);
   row.appendChild(det);
-  messagesInner.appendChild(row);
+  renderTarget.appendChild(row);
   pendingBtwBlockRef = row;
   setBtwStatus(t("Answering /btw") + (model ? " " + t("with {0}", model) : "") + "\u2026");
   scheduleScroll();
@@ -257,10 +276,10 @@ export function handleBtw(lines: string[]) {
 }
 
 export function startAssistantMessage(ts?: number) {
-  const empty = messagesInner.querySelector(".empty");
+  const empty = renderTarget.querySelector(".empty");
   if (empty) empty.remove();
   const row = el("div", "msg assistant");
-  messagesInner.appendChild(row);
+  renderTarget.appendChild(row);
   (row as any)._piTs = ts != null ? ts : null;
   setCurrentAssistant({
     el: row,
@@ -292,7 +311,7 @@ export function endAssistantMessage() {
     (currentAssistant.el as any)._piHasToolCall = assistantHasToolCalls();
     setCurrentAssistant(null);
   }
-  applyLastAssistantModel();
+  if (!suppressUi) applyLastAssistantModel();
 }
 
 export function applyLastAssistantModel() {
@@ -891,7 +910,7 @@ function applyToolSummary(b: any, name: string, args: any) {
 }
 
 export function findToolBlock(toolCallId: string): any {
-  const children = messagesInner.querySelectorAll(
+  const children = renderTarget.querySelectorAll(
     '.tool-block[data-tcid="' + cssEscape(toolCallId) + '"]',
   );
   if (children.length) {
@@ -1452,7 +1471,7 @@ export function hydrateMessages(list: any[]) {
     rebuildCtxRingTooltip();
     return;
   }
-  setStatus(t("Loading history..."));
+  setStatus(t("Loading history…"));
   let i = 0;
   const CHUNK = 8;
   function step() {
@@ -1472,12 +1491,88 @@ export function hydrateMessages(list: any[]) {
   requestAnimationFrame(step);
 }
 
+export function resetHistoryBlock(available: boolean) {
+  historyHydrationId++;
+  if (historyBlockEl) {
+    historyBlockEl.remove();
+    historyBlockEl = null;
+  }
+  historyLoaded = false;
+  historyRequested = false;
+  if (!available) return;
+  const det = document.createElement("details");
+  det.className = "history-block";
+  const summ = document.createElement("summary");
+  const label = el("span", "history-label");
+  label.textContent = t("Show earlier compacted messages");
+  summ.appendChild(label);
+  det.appendChild(summ);
+  const body = el("div", "history-body");
+  det.appendChild(body);
+  det.addEventListener("toggle", function () {
+    if (!(det as HTMLDetailsElement).open) return;
+    if (historyLoaded || historyRequested) return;
+    historyRequested = true;
+    body.textContent = "";
+    const loadEl = el("div", "history-loading");
+    loadEl.textContent = t("Loading history…");
+    body.appendChild(loadEl);
+    vscode.postMessage({ type: "requestHistory" });
+  });
+  messagesInner.prepend(det);
+  historyBlockEl = det;
+}
+
+export function renderHistoryBlock(list: any[]) {
+  if (!historyBlockEl) return;
+  const det = historyBlockEl;
+  const body = det.querySelector(".history-body");
+  if (!body) return;
+  historyLoaded = true;
+  body.textContent = "";
+  const container = el("div", "history-content");
+  body.appendChild(container);
+  const prevTarget = renderTarget;
+  const prevSuppress = suppressUi;
+  renderTarget = container;
+  suppressUi = true;
+  let i = 0;
+  const CHUNK = 8;
+  const id = ++historyHydrationId;
+  function step() {
+    if (id !== historyHydrationId) {
+      renderTarget = prevTarget;
+      suppressUi = prevSuppress;
+      return;
+    }
+    try {
+      const end = Math.min(i + CHUNK, (list || []).length);
+      for (; i < end; i++) hydrateOne(list[i]);
+      if (i < list.length) {
+        requestAnimationFrame(step);
+      } else {
+        if (!list || !list.length) {
+          const emptyTip = el("div", "history-empty");
+          emptyTip.textContent = t("No earlier messages.");
+          container.appendChild(emptyTip);
+        }
+        renderTarget = prevTarget;
+        suppressUi = prevSuppress;
+      }
+    } catch {
+      renderTarget = prevTarget;
+      suppressUi = prevSuppress;
+    }
+  }
+  requestAnimationFrame(step);
+}
+
 function hydrateOne(m: any) {
   if (!m || typeof m !== "object") return;
   const role = m.role;
   if (role === "user") {
     const utext = extractText(m.content);
-    pushHistory(utext);
+    if (!suppressUi) pushHistory(utext);
     const ub = addUserMessage(utext, extractImages(m.content));
     if (m && m.timestamp != null) applyUserBubbleTime(ub, m.timestamp);
   } else if (role === "assistant") {

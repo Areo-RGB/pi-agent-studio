@@ -15,6 +15,7 @@ import type {
   RpcClient,
   RpcEvent,
   RpcImage,
+  RpcSessionEntry,
   RpcSessionStats,
 } from "./chat-types.ts";
 import { createRpcClient } from "./rpc-client.ts";
@@ -87,6 +88,68 @@ function messageText(content: unknown): string {
   return t;
 }
 
+function buildActiveBranch(entries: RpcSessionEntry[], leafId: string | null): RpcSessionEntry[] {
+  const byId = new Map<string, RpcSessionEntry>();
+  for (const e of entries) byId.set(e.id, e);
+  const path: RpcSessionEntry[] = [];
+  const seen = new Set<string>();
+  let id: string | null = leafId;
+  while (id != null) {
+    if (seen.has(id)) break;
+    seen.add(id);
+    const entry = byId.get(id);
+    if (!entry) break;
+    path.push(entry);
+    id = entry.parentId ?? null;
+  }
+  return path.reverse();
+}
+
+function compactedHistoryMessages(
+  entries: RpcSessionEntry[],
+  leafId: string | null,
+): unknown[] | null {
+  const branch = buildActiveBranch(entries, leafId);
+  let lastCompaction: RpcSessionEntry | null = null;
+  let lastCompactionIndex = -1;
+  for (let i = branch.length - 1; i >= 0; i--) {
+    const e = branch[i];
+    if (e && e.type === "compaction") {
+      lastCompaction = e;
+      lastCompactionIndex = i;
+      break;
+    }
+  }
+  if (!lastCompaction) return null;
+  // Entries before the latest compaction's firstKeptEntryId were summarized away
+  // (kept entries still appear in get_messages and must not be duplicated here).
+  const boundaryId = lastCompaction.firstKeptEntryId;
+  let historyEnd = lastCompactionIndex;
+  if (boundaryId) {
+    for (let i = 0; i < lastCompactionIndex; i++) {
+      if (branch[i]?.id === boundaryId) {
+        historyEnd = i;
+        break;
+      }
+    }
+  }
+  const out: unknown[] = [];
+  for (let i = 0; i < historyEnd; i++) {
+    const entry = branch[i];
+    if (!entry) continue;
+    if (entry.type === "message" && entry.message) {
+      out.push(entry.message);
+    } else if (entry.type === "compaction") {
+      out.push({
+        role: "compactionSummary",
+        summary: entry.summary ?? "",
+        tokensBefore: typeof entry.tokensBefore === "number" ? entry.tokensBefore : undefined,
+      });
+    }
+  }
+  return out;
+}
+
 function openRewindDiff(msg: {
   absPath: string;
   baselineHash: string | null;
@@ -145,6 +208,8 @@ export async function createChatSession(
   let branchResolved = false;
   let streaming = false;
   let switchedSession = false;
+  let historyLoaded = false;
+  let historyLoading: Promise<void> | null = null;
   let rpc: RpcClient;
 
   const cwd = opts.cwd ?? vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
@@ -223,7 +288,7 @@ export async function createChatSession(
       // rehydrate so the compactionSummary block renders in-stream
       try {
         const msgs = await rpc.getMessages();
-        if (!sessionDisposed) host.postMessage({ type: "messages", messages: msgs });
+        if (!sessionDisposed) postMessages(msgs);
       } catch {
         // fall through to context refresh
       }
@@ -251,6 +316,38 @@ export async function createChatSession(
   function toast(text: string, kind?: "info" | "success" | "error" | "warning"): void {
     if (sessionDisposed) return;
     host.postMessage({ type: "toast", text, ...(kind ? { kind } : {}) });
+  }
+
+  function postMessages(messages: unknown[]): void {
+    if (sessionDisposed) return;
+    historyLoaded = false;
+    const historyAvailable = messages.some(
+      (m) => !!m && typeof m === "object" && (m as { role?: string }).role === "compactionSummary",
+    );
+    host.postMessage({ type: "messages", messages, historyAvailable });
+  }
+
+  async function requestHistory(): Promise<void> {
+    if (sessionDisposed || historyLoaded || historyLoading) return;
+    historyLoading = (async () => {
+      try {
+        const entriesData = await rpc.getEntries();
+        const history = compactedHistoryMessages(entriesData.entries, entriesData.leafId) ?? [];
+        if (sessionDisposed) return;
+        historyLoaded = true;
+        host.postMessage({ type: "history", messages: history });
+      } catch (e) {
+        if (!sessionDisposed) {
+          host.postMessage({
+            type: "error",
+            message: e instanceof Error ? e.message : String(e),
+          });
+        }
+      } finally {
+        historyLoading = null;
+      }
+    })();
+    await historyLoading;
   }
 
   function showInfoPanel(title: string, markdown: string): void {
@@ -408,7 +505,7 @@ export async function createChatSession(
       host.postMessage({ type: "commands", commands: mergeBuiltinCommands(cmds) });
       applySessionFile(st.sessionFile, st.sessionName);
       const messages = await rpc.getMessages();
-      host.postMessage({ type: "messages", messages });
+      postMessages(messages);
       if (st.isStreaming) {
         streaming = true;
         host.updateTitle?.(true, sessionName);
@@ -685,7 +782,7 @@ export async function createChatSession(
           applySessionFile(rSt.sessionFile, rSt.sessionName);
           host.postMessage({ type: "state", state: rSt });
           const rMsgs = await rpc.getMessages();
-          host.postMessage({ type: "messages", messages: rMsgs });
+          postMessages(rMsgs);
           void sendContextUsage();
           toast("Forked from selected message.", "success");
         } catch (e) {
@@ -719,7 +816,7 @@ export async function createChatSession(
           applySessionFile(revSt.sessionFile, revSt.sessionName);
           host.postMessage({ type: "state", state: revSt });
           const revMsgs = await rpc.getMessages();
-          host.postMessage({ type: "messages", messages: revMsgs });
+          postMessages(revMsgs);
           if (revText) host.postMessage({ type: "prefillInput", text: revText });
           void sendContextUsage();
           toast("Reverted to selected message.", "success");
@@ -736,6 +833,9 @@ export async function createChatSession(
           confirmed: msg.confirmed as boolean | undefined,
           cancelled: msg.cancelled as boolean | undefined,
         });
+        break;
+      case "requestHistory":
+        void requestHistory();
         break;
       case "reload":
         void reloadSession();
@@ -839,7 +939,7 @@ export async function createChatSession(
     host.postMessage({ type: "state", state: st });
     const messages = await rpc.getMessages();
     if (sessionDisposed) return;
-    host.postMessage({ type: "messages", messages });
+    postMessages(messages);
     void sendContextUsage();
   }
 

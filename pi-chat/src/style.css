@@ -1089,6 +1089,49 @@ body {
 .compaction-body > :last-child {
   margin-bottom: 0;
 }
+.history-block {
+  background: transparent;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+.history-block > summary {
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+  font-size: var(--chat-fs-12);
+  opacity: 0.75;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+}
+.history-block > summary::-webkit-details-marker {
+  display: none;
+}
+.history-block > summary:before {
+  content: "\25b6";
+  font-size: var(--chat-fs-9);
+  opacity: 0.6;
+}
+.history-block[open] > summary:before {
+  content: "\25bc";
+}
+.history-body {
+  padding-left: 16px;
+  max-height: 60vh;
+  overflow-y: auto;
+}
+.history-content {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.history-loading,
+.history-empty {
+  opacity: 0.6;
+  font-size: var(--chat-fs-12);
+  padding: 4px 0;
+}
 .btw-block {
   display: flex;
   flex-direction: column;

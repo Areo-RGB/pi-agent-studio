@@ -197,7 +197,7 @@ Useful dev commands:
 - `pnpm dev` — rolldown watch mode
 - `pnpm fmt` — `oxlint --fix` + `oxfmt`
 - `pnpm lint` — `oxlint . && oxfmt --check .`
-- `pnpm typecheck` — `tsgo --noEmit --skipLibCheck`
+- `pnpm typecheck` — `tsgo --noEmit --skipLibCheck` + `./typecheck.sh` (bridge TS via `tsconfig.bridge.json`)
 - `pnpm vitest run` — run the test suite
 
 ## Changelog

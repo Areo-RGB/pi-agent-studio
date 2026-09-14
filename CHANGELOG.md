@@ -2,6 +2,11 @@
 
 All notable changes to **Pi Agent Studio** are documented in this file.
 
+## [1.3.9] - 2026-09-14
+
+- **Show earlier compacted messages**: after a compaction, the chat now prepends a collapsible "Show earlier compacted messages" block.
+- **Pi SDK 0.85.1**: `@earendil-works/pi-ai` / `@earendil-works/pi-coding-agent` (and the `pi-mcp` dev dependencies) bumped to `^0.85.1`.
+
 ## [1.3.8] - 2026-09-03
 
 - **Clear queue button**: the chat queue now has a one-click clear button (with tooltip and i18n) that empties all queued steer/follow-up messages via a new `clearQueue` RPC method.

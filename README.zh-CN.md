@@ -197,7 +197,7 @@ pnpm install-local # 打包并安装到本地 VS Code
 - `pnpm dev` —— rolldown watch 模式
 - `pnpm fmt` —— `oxlint --fix` + `oxfmt`
 - `pnpm lint` —— `oxlint . && oxfmt --check .`
-- `pnpm typecheck` —— `tsgo --noEmit --skipLibCheck`
+- `pnpm typecheck` —— `tsgo --noEmit --skipLibCheck` + `./typecheck.sh`（bridge TS 由 `tsconfig.bridge.json` 检查）
 - `pnpm vitest run` —— 运行测试套件
 
 ## 更新日志
